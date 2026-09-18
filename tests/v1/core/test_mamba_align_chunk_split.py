@@ -132,13 +132,16 @@ def _split(
     partial_hit: bool = False,
     num_prefill_checkpoint_blocks: int = 0,
     max_num_scheduled_tokens: int = 16384,
+    cache_block_size: int = MAMBA_BLOCK_SIZE,
 ) -> int:
     """Call the real `Scheduler._mamba_block_aligned_split` on a stub self."""
     if use_eagle_block_drop is None:
         use_eagle_block_drop = use_eagle
     stub = SimpleNamespace(
         block_size=MAMBA_BLOCK_SIZE,
-        cache_config=SimpleNamespace(block_size=MAMBA_BLOCK_SIZE),
+        cache_config=SimpleNamespace(
+            block_size=cache_block_size, mamba_block_size=MAMBA_BLOCK_SIZE
+        ),
         use_eagle_block_drop=use_eagle_block_drop,
         max_num_scheduled_tokens=max_num_scheduled_tokens,
         scheduler_config=SimpleNamespace(long_prefill_token_threshold=0),
@@ -177,6 +180,19 @@ def test_internal_checkpoint_split(
             num_prefill_checkpoint_blocks=1,
         )
         == expected
+    )
+
+
+def test_split_aligns_to_mamba_block_not_smallest_group_block() -> None:
+    # A DFlash sliding-window drafter group with 64-token blocks shrinks
+    # cache_config.block_size below the Mamba block size.
+    (request,) = create_requests(
+        1, num_tokens=4 * MAMBA_BLOCK_SIZE, block_size=ATTN_BLOCK_SIZE
+    )
+    request.num_computed_tokens = MAMBA_BLOCK_SIZE
+
+    assert _split(request, 1984, use_eagle=False, cache_block_size=64) == (
+        MAMBA_BLOCK_SIZE
     )
 
 

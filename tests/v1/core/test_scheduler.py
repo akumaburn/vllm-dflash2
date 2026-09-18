@@ -4160,6 +4160,7 @@ def test_mamba_align_encoder_cache_cap_makes_progress():
         enable_prefix_caching=True,
     )
     scheduler.need_mamba_block_aligned_split = True
+    scheduler.cache_config.mamba_block_size = block_size
     scheduler.max_num_encoder_input_tokens = encoder_cache_size
     scheduler.encoder_cache_manager = EncoderCacheManager(cache_size=encoder_cache_size)
 
@@ -4213,6 +4214,7 @@ def test_mamba_align_eagle_schedules_encoder_at_boundary():
         enable_prefix_caching=True,
     )
     scheduler.need_mamba_block_aligned_split = True
+    scheduler.cache_config.mamba_block_size = block_size
     scheduler.use_eagle = True
     scheduler.num_prefill_lookahead = 1
     scheduler.max_num_encoder_input_tokens = 2048

@@ -433,7 +433,10 @@ class Scheduler(SchedulerInterface):
         if start >= prefill_end:
             return num_new_tokens
 
-        block_size = self.cache_config.block_size
+        # Not cache_config.block_size: it becomes the smallest group block size
+        # (e.g. a DFlash sliding-window drafter's), below the Mamba block size.
+        block_size = self.cache_config.mamba_block_size
+        assert block_size is not None
         # The last block-aligned position whose state can be cached. With
         # Eagle, FullAttn prunes the last matching block, so back off one
         # block to avoid a Mamba cache miss.

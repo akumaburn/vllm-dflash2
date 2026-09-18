@@ -14,8 +14,31 @@ from vllm.v1.attention.backends.recoverssm_metadata import (
     RecoverSSMPostprocessMetadata,
 )
 from vllm.v1.worker.gpu.model_states import mamba_hybrid
+from vllm.v1.worker.gpu.model_states.default import DefaultModelState
 from vllm.v1.worker.gpu.model_states.mamba_hybrid import MambaHybridModelState
 from vllm.v1.worker.gpu.model_states.recoverssm import RecoverSSMState
+
+
+def test_add_request_seeds_align_state_idx_from_mamba_block_size(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A prefix hit resumes from the Mamba column of its cached state.
+
+    cache_config.block_size shrinks to the smallest KV group block size (e.g. a
+    DFlash sliding-window drafter's), so seeding from it sent the align
+    pre-copy kernel far past the Mamba block table row (illegal memory access).
+    """
+    monkeypatch.setattr(DefaultModelState, "add_request", lambda *args: None)
+    state = object.__new__(MambaHybridModelState)
+    state.cache_config = SimpleNamespace(block_size=64, mamba_block_size=1648)
+    state._align_mode = True
+    state.num_accepted_tokens_gpu = torch.full((2,), 9, dtype=torch.int32)
+    state._mamba_state_idx_gpu = torch.zeros(2, dtype=torch.int32)
+
+    state.add_request(1, SimpleNamespace(num_computed_tokens=156 * 1648))
+
+    assert state._mamba_state_idx_gpu.tolist() == [0, 155]
+    assert state.num_accepted_tokens_gpu.tolist() == [9, 1]
 
 
 def test_prepare_attn_forwards_positions(monkeypatch: pytest.MonkeyPatch) -> None:

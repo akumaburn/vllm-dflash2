@@ -359,6 +359,14 @@ class DFlashQwen3DecoderLayer(nn.Module):
 def _dense_kv_rows(attn: nn.Module) -> torch.Tensor:
     """Rows [q_size:] of the qkv projection as a dense matrix.
 
+    NOTE: this is a narrow stopgap covering pack-quantized (W4A16/W8A16)
+    drafters, which is the case that crashes at startup. Upstream
+    vllm-project/vllm#51581 documents that slicing the raw `.weight` is wrong in
+    several ways depending on the quantization scheme, and #51684 is the
+    comprehensive fix (tiered FUSED / SCALED_MM / FUSED_DEQUANT / PER_LAYER,
+    also covering FP8 and block-quant). Prefer #51684 once it lands; this exists
+    so a pack-quantized drafter works on 0.29.0 today.
+
     For a compressed-tensors W4A16/W8A16 (pack-quantized, symmetric, group)
     qkv_proj this runs before the Marlin repack, so weight_packed/weight_scale
     are still in the plain checkpoint layout and can be dequantized here. A

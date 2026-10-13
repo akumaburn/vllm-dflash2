@@ -1252,6 +1252,11 @@ class Scheduler(SchedulerInterface):
                         self._inflight_prefill_reserved_blocks()
                         + self._spec_decode_step_blocks
                     )
+                elif self.scheduler_reserve_full_isl and self._inflight_prefills:
+                    # Leave room for in-flight prefills to finish; otherwise a
+                    # new long prompt is admitted into blocks they still need
+                    # and gets preempted, discarding its partial prefill.
+                    reserved_blocks = self._inflight_prefill_reserved_blocks()
 
                 # Replayed tokens are already counted in the adopted hit; a
                 # chunk that ends inside the replayed range needs no new slots.

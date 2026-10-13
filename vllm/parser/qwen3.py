@@ -25,6 +25,7 @@ import regex as re
 from vllm.parser.engine.events import EventType
 from vllm.parser.engine.parser_engine import ParserEngine
 from vllm.parser.engine.parser_engine_config import (
+    ArgValueExtender,
     ParserEngineConfig,
     ParserState,
     Transition,
@@ -66,7 +67,11 @@ def _trim_wrapping_newlines(value: str) -> str:
     return value
 
 
-def _qwen3_arg_converter(raw_args: str, partial: bool) -> str:
+def _qwen3_parse_args(
+    raw_args: str, partial: bool
+) -> tuple[dict[str, object], str | None, str]:
+    """Return the arguments, the name of the open trailing parameter (if any)
+    and its raw, untrimmed value."""
     params: dict[str, object] = {}
 
     for match in _PARAM_RE.finditer(raw_args):
@@ -74,6 +79,7 @@ def _qwen3_arg_converter(raw_args: str, partial: bool) -> str:
         value = match.group(2)
         params[name] = _trim_wrapping_newlines(value)
 
+    open_name, open_raw = None, ""
     if partial:
         remaining = _PARAM_RE.sub("", raw_args)
         m = _PARTIAL_PARAM_RE.search(remaining)
@@ -82,8 +88,46 @@ def _qwen3_arg_converter(raw_args: str, partial: bool) -> str:
             value = m.group(2)
             if name:
                 params[name] = _trim_wrapping_newlines(value)
+                open_name, open_raw = name, value
 
-    return json.dumps(params, ensure_ascii=False)
+    return params, open_name, open_raw
+
+
+def _qwen3_arg_converter(raw_args: str, partial: bool) -> str:
+    return json.dumps(_qwen3_parse_args(raw_args, partial)[0], ensure_ascii=False)
+
+
+def _qwen3_arg_value_extender(raw_args: str) -> ArgValueExtender | None:
+    # Every terminator of the open value starts with "<", so a delta without
+    # "<" only appends to it, unless an earlier "<" is still unclosed.
+    params, open_name, raw = _qwen3_parse_args(raw_args, partial=True)
+    if open_name is None or next(reversed(params)) != open_name:
+        return None
+    last_lt = raw.rfind("<")
+    if last_lt >= 0 and ">" not in raw[last_lt:]:
+        return None
+
+    # Mirror _trim_wrapping_newlines: one leading newline is dropped, and a
+    # trailing newline is held back until more text follows it.
+    at_start = not raw
+    body = raw[1:] if raw.startswith("\n") else raw
+    held_newline = body.endswith("\n")
+
+    def extend(delta: str) -> str | None:
+        nonlocal at_start, held_newline
+        if "<" in delta:
+            return None
+        if at_start and delta:
+            at_start = False
+            if delta.startswith("\n"):
+                delta = delta[1:]
+        text = ("\n" if held_newline else "") + delta
+        held_newline = text.endswith("\n")
+        if held_newline:
+            text = text[:-1]
+        return json.dumps(text, ensure_ascii=False)[1:-1]
+
+    return extend
 
 
 @functools.cache
@@ -196,6 +240,7 @@ def qwen3_config(
             ),
         },
         arg_converter=_qwen3_arg_converter,
+        arg_value_extender=_qwen3_arg_value_extender,
         stream_arg_deltas=True,
         strip_trailing_reasoning_whitespace=False,
         tool_args_json=False,

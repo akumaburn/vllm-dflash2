@@ -889,6 +889,14 @@ class MPClient(EngineCoreClient):
         return dict(self._kv_event_sources)
 
 
+def _fail_pending_utility_calls(utility_results: dict[int, AnyFuture]) -> None:
+    """Fail utility calls still awaiting a reply once no more outputs can come."""
+    while utility_results:
+        _, future = utility_results.popitem()
+        if not future.done():
+            future.set_exception(EngineDeadError())
+
+
 def _process_utility_output(
     output: UtilityOutput, utility_results: dict[int, AnyFuture]
 ):
@@ -1216,8 +1224,10 @@ class AsyncMPClient(MPClient):
                     if outputs.outputs or outputs.scheduler_stats:
                         outputs_queue.put_nowait(outputs)
             except Exception as e:
+                _fail_pending_utility_calls(utility_results)
                 outputs_queue.put_nowait(e)
             except asyncio.CancelledError:
+                _fail_pending_utility_calls(utility_results)
                 outputs_queue.put_nowait(EngineDeadError())
 
         resources.output_queue_task = asyncio.create_task(

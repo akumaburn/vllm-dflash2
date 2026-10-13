@@ -353,7 +353,12 @@ class CoreEngineProcManager:
         sentinels = set(sentinel_to_proc.keys())
 
         while sentinels and not self.manager_stopped.is_set():
-            died_sentinels = connection.wait(sentinels, timeout=1)
+            died_sentinels = set(connection.wait(sentinels, timeout=1))
+            # A descendant that inherited the sentinel pipe keeps it open after
+            # the engine exits, so also poll (and reap) the processes directly.
+            died_sentinels.update(
+                s for s in sentinels if sentinel_to_proc[s].exitcode is not None
+            )
 
             for sentinel in died_sentinels:
                 proc = sentinel_to_proc.pop(cast(int, sentinel))

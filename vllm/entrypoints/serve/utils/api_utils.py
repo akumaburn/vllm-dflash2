@@ -188,7 +188,8 @@ def load_aware_call(func):
         raw_request.app.state.server_load_metrics += 1
         try:
             response = await func(*args, **kwargs)
-        except Exception:
+        except BaseException:
+            # Includes CancelledError from a client disconnect.
             raw_request.app.state.server_load_metrics -= 1
             raise
 
